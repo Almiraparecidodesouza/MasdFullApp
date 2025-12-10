@@ -43,4 +43,24 @@ Este projeto está em desenvolvimento e pode sofrer alterações. Novas funciona
 
 Flutter e Dart
 
+🔮 Melhorias Futuras
+
+O protótipo está em andamento e as seguintes melhorias serão implementadas em breve:
+
+Banco de Dados: Persistência de dados com banco local ou em nuvem.
+
+Validação de Dados: Garantir integridade e precisão nos dados inseridos.
+
+Autenticação: Telas de login e registro de usuários.
+
+Animações: Melhorias nas transições e animações.
+
+Relatórios: Geração de relatórios e gráficos sobre indicadores de saúde.
+
+Design: Melhoria na interface e responsividade.
+
+<img width="723" height="426" alt="image" src="https://github.com/user-attachments/assets/49e47654-955a-4c9c-9525-045a8ef8b1be" />
+
+
+
 Almir Souza | GitHub: Almiraparecidodesouza
