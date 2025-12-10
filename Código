@@ -1,0 +1,726 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+
+void main() => runApp(const MasdFullApp());
+
+/// ---------------- Model ----------------
+class Component {
+  String id;
+  String name;
+  String description;
+  String category;
+  String type;
+  String responsible;
+  String status; // Ativo/Inativo/Em Validação
+  String priority; // Baixa/Média/Alta
+  DateTime createdAt;
+  DateTime updatedAt;
+  DateTime? dueDate;
+  List<String> tags;
+  List<String> attachments; // nomes simulados
+  List<String> history;
+  List<Component> children; // subcomponentes
+
+  Component({
+    required this.id,
+    required this.name,
+    this.description = '',
+    this.category = 'Geral',
+    this.type = 'Componente',
+    this.responsible = '',
+    this.status = 'Ativo',
+    this.priority = 'Média',
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    this.dueDate,
+    List<String>? tags,
+    List<String>? attachments,
+    List<String>? history,
+    List<Component>? children,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now(),
+        tags = tags ?? [],
+        attachments = attachments ?? [],
+        history = history ?? [],
+        children = children ?? [];
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'description': description,
+        'category': category,
+        'type': type,
+        'responsible': responsible,
+        'status': status,
+        'priority': priority,
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+        'dueDate': dueDate?.toIso8601String(),
+        'tags': tags,
+        'attachments': attachments,
+        'history': history,
+        'children': children.map((c) => c.toJson()).toList(),
+      };
+
+  static Component fromJson(Map<String, dynamic> j) {
+    return Component(
+      id: j['id'] ?? 'c-${DateTime.now().millisecondsSinceEpoch}',
+      name: j['name'] ?? '',
+      description: j['description'] ?? '',
+      category: j['category'] ?? 'Geral',
+      type: j['type'] ?? 'Componente',
+      responsible: j['responsible'] ?? '',
+      status: j['status'] ?? 'Ativo',
+      priority: j['priority'] ?? 'Média',
+      createdAt: DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
+      updatedAt: DateTime.tryParse(j['updatedAt'] ?? '') ?? DateTime.now(),
+      dueDate: DateTime.tryParse(j['dueDate'] ?? ''),
+      tags: List<String>.from(j['tags'] ?? []),
+      attachments: List<String>.from(j['attachments'] ?? []),
+      history: List<String>.from(j['history'] ?? []),
+      children: (j['children'] as List? ?? []).map((e) => Component.fromJson(Map<String, dynamic>.from(e))).toList(),
+    );
+  }
+
+  Component cloneShallowNewId() {
+    return Component(
+      id: 'c-${DateTime.now().millisecondsSinceEpoch}',
+      name: name,
+      description: description,
+      category: category,
+      type: type,
+      responsible: responsible,
+      status: status,
+      priority: priority,
+      tags: List.from(tags),
+      attachments: List.from(attachments),
+      history: [
+        ...history,
+        'Clonado em ${DateTime.now().toIso8601String()}',
+      ],
+      children: children.map((c) => c.cloneShallowNewId()).toList(),
+    );
+  }
+}
+
+/// ---------------- App ----------------
+class MasdFullApp extends StatelessWidget {
+  const MasdFullApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'MASD - Completo',
+      theme: ThemeData(primarySwatch: Colors.green),
+      home: const HomeScreen(),
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+/// ---------------- Home Screen ----------------
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final List<Component> components = [];
+  final List<String> categories = ['Geral', 'Programa', 'Indicador', 'Processo', 'Unidade', 'Projeto'];
+  final List<String> types = ['Componente', 'Indicador', 'Elemento', 'Item', 'Programa'];
+
+  // filters / search / sort
+  String search = '';
+  String filterCategory = 'Todos';
+  String filterPriority = 'Todos';
+  String filterStatus = 'Todos';
+  String sortBy = 'Criado (desc)';
+
+  // internal clipboard
+  Component? clipboard;
+
+  @override
+  void initState() {
+    super.initState();
+    _seed();
+  }
+
+  void _seed() {
+    // sample seed with children
+    final a = Component(
+      id: 'c-001',
+      name: 'Registro de Pacientes',
+      description: 'Armazena informações básicas dos pacientes',
+      category: 'Programa',
+      type: 'Componente',
+      responsible: 'Equipe A',
+      status: 'Ativo',
+      priority: 'Alta',
+      tags: ['pacientes', 'dados'],
+      history: ['Criado automaticamente'],
+      children: [
+        Component(id: 'c-001-1', name: 'Formulário', description: 'Form para cadastro', category: 'Programa', type: 'Elemento', responsible: 'A1'),
+      ],
+    );
+
+    final b = Component(
+      id: 'c-002',
+      name: 'Indicador de Cobertura',
+      description: 'Calcula cobertura vacinal por região',
+      category: 'Indicador',
+      type: 'Indicador',
+      responsible: 'Equipe B',
+      status: 'Inativo',
+      priority: 'Média',
+      tags: ['vacina'],
+      history: ['Importado em 2024-10-01'],
+    );
+
+    components.addAll([a, b]);
+  }
+
+  void _saveAudit(Component c, String action) {
+    c.history.add('${DateTime.now().toIso8601String()} - $action');
+  }
+
+  List<Component> get _viewList {
+    var list = <Component>[];
+    // top-level list only (children visible inside parent card)
+    list.addAll(components);
+
+    // apply filters/search
+    list = list.where((c) {
+      final matchesSearch = search.trim().isEmpty ||
+          c.name.toLowerCase().contains(search.toLowerCase()) ||
+          c.description.toLowerCase().contains(search.toLowerCase()) ||
+          c.tags.any((t) => t.toLowerCase().contains(search.toLowerCase()));
+      final matchesCategory = filterCategory == 'Todos' || c.category == filterCategory;
+      final matchesPriority = filterPriority == 'Todos' || c.priority == filterPriority;
+      final matchesStatus = filterStatus == 'Todos' || c.status == filterStatus;
+      return matchesSearch && matchesCategory && matchesPriority && matchesStatus;
+    }).toList();
+
+    // sort
+    if (sortBy == 'Nome (A-Z)') {
+      list.sort((a, b) => a.name.compareTo(b.name));
+    } else if (sortBy == 'Nome (Z-A)') {
+      list.sort((a, b) => b.name.compareTo(a.name));
+    } else if (sortBy == 'Criado (asc)') {
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    } else {
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+
+    return list;
+  }
+
+  // ---------- CRUD ----------
+  void _openCreate({Component? parent}) {
+    _openCreateEditDialog(parent: parent);
+  }
+
+  void _openEdit(Component c) => _openCreateEditDialog(existing: c);
+
+  void _delete(Component c, {Component? parent}) {
+    setState(() {
+      if (parent == null) {
+        components.removeWhere((x) => x.id == c.id);
+      } else {
+        parent.children.removeWhere((x) => x.id == c.id);
+      }
+    });
+    _saveAudit(c, 'Excluído');
+    _showSnack('Componente excluído');
+  }
+
+  void _copy(Component c) {
+    clipboard = c.cloneShallowNewId();
+    _showSnack('Componente copiado para clipboard interno');
+  }
+
+  void _paste({Component? targetParent}) {
+    if (clipboard == null) {
+      _showSnack('Nada no clipboard.');
+      return;
+    }
+    setState(() {
+      final copy = clipboard!.cloneShallowNewId();
+      if (targetParent == null) {
+        components.add(copy);
+      } else {
+        targetParent.children.add(copy);
+      }
+    });
+    _showSnack('Colado com sucesso.');
+  }
+
+  // ---------- Create / Edit dialog ----------
+  Future<void> _openCreateEditDialog({Component? existing, Component? parent}) async {
+    final isEdit = existing != null;
+    final idCtrl = TextEditingController(text: existing?.id ?? '');
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final descCtrl = TextEditingController(text: existing?.description ?? '');
+    final respCtrl = TextEditingController(text: existing?.responsible ?? '');
+    final tagsCtrl = TextEditingController(text: existing != null ? existing.tags.join(', ') : '');
+    final attachCtrl = TextEditingController();
+
+    String category = existing?.category ?? categories.first;
+    String type = existing?.type ?? types.first;
+    String priority = existing?.priority ?? 'Média';
+    String status = existing?.status ?? 'Ativo';
+    DateTime? due = existing?.dueDate;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx2, setDialogState) {
+          // local temporary attachments list (only inside dialog until saved)
+          final tempAttachments = List<String>.from(existing?.attachments ?? []);
+          return AlertDialog(
+            title: Text(isEdit ? 'Editar componente' : (parent == null ? 'Criar componente' : 'Criar subcomponente de "${parent.name}"')),
+            content: SingleChildScrollView(
+              child: Column(
+                children: [
+                  TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nome *')),
+                  TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Descrição')),
+                  Row(children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: category,
+                        items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                        onChanged: (v) => setDialogState(() => category = v ?? category),
+                        decoration: const InputDecoration(labelText: 'Categoria'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: type,
+                        items: types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                        onChanged: (v) => setDialogState(() => type = v ?? type),
+                        decoration: const InputDecoration(labelText: 'Tipo'),
+                      ),
+                    ),
+                  ]),
+                  Row(children: [
+                    Expanded(child: TextField(controller: respCtrl, decoration: const InputDecoration(labelText: 'Responsável'))),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: priority,
+                        items: ['Alta', 'Média', 'Baixa'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+                        onChanged: (v) => setDialogState(() => priority = v ?? priority),
+                        decoration: const InputDecoration(labelText: 'Prioridade'),
+                      ),
+                    ),
+                  ]),
+                  DropdownButtonFormField<String>(
+                    value: status,
+                    items: ['Ativo', 'Inativo', 'Em Validação'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    onChanged: (v) => setDialogState(() => status = v ?? status),
+                    decoration: const InputDecoration(labelText: 'Status'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(controller: tagsCtrl, decoration: const InputDecoration(labelText: 'Tags (vírgula)')),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: Text('Data alvo: ${due == null ? '- nenhuma -' : due!.toLocal().toIso8601String().split("T").first}')),
+                    TextButton(
+                        onPressed: () async {
+                          final picked = await showDatePicker(context: context, initialDate: due ?? DateTime.now(), firstDate: DateTime(2000), lastDate: DateTime(2100));
+                          if (picked != null) setDialogState(() => due = picked);
+                        },
+                        child: const Text('Selecionar')),
+                    if (due != null) TextButton(onPressed: () => setDialogState(() => due = null), child: const Text('Remover')),
+                  ]),
+                  const SizedBox(height: 8),
+                  // attachments simulated
+                  Row(children: [
+                    Expanded(child: TextField(controller: attachCtrl, decoration: const InputDecoration(hintText: 'Nome do anexo (ex: relatorio.pdf)'))),
+                    IconButton(onPressed: () {
+                      final val = attachCtrl.text.trim();
+                      if (val.isNotEmpty) {
+                        setDialogState(() {
+                          tempAttachments.add(val);
+                          attachCtrl.clear();
+                        });
+                      }
+                    }, icon: const Icon(Icons.attach_file))
+                  ]),
+                  if (tempAttachments.isNotEmpty)
+                    Wrap(spacing: 6, children: tempAttachments.map((a) => Chip(label: Text(a))).toList()),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('Cancelar')),
+              ElevatedButton(
+                onPressed: () {
+                  final name = nameCtrl.text.trim();
+                  if (name.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nome é obrigatório')));
+                    return;
+                  }
+                  final tags = tagsCtrl.text.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+                  if (isEdit) {
+                    setState(() {
+                      existing!
+                        ..name = name
+                        ..description = descCtrl.text.trim()
+                        ..category = category
+                        ..type = type
+                        ..responsible = respCtrl.text.trim()
+                        ..priority = priority
+                        ..status = status
+                        ..dueDate = due
+                        ..tags = tags
+                        ..attachments = tempAttachments
+                        ..updatedAt = DateTime.now();
+                      _saveAudit(existing!, 'Editado');
+                    });
+                    _showSnack('Componente atualizado');
+                  } else {
+                    final newComp = Component(
+                      id: idCtrl.text.trim().isEmpty ? 'c-${DateTime.now().millisecondsSinceEpoch}' : idCtrl.text.trim(),
+                      name: name,
+                      description: descCtrl.text.trim(),
+                      category: category,
+                      type: type,
+                      responsible: respCtrl.text.trim(),
+                      status: status,
+                      priority: priority,
+                      dueDate: due,
+                      tags: tags,
+                      attachments: tempAttachments,
+                    );
+                    newComp.history.add('Criado em ${DateTime.now().toIso8601String()}');
+                    setState(() {
+                      if (parent == null) components.add(newComp);
+                      else parent.children.add(newComp);
+                    });
+                    _showSnack('Componente criado');
+                  }
+                  Navigator.pop(ctx2);
+                },
+                child: Text(isEdit ? 'Salvar' : 'Criar'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
+  // ---------- Export / Import JSON (via dialog copy/paste) ----------
+  void _exportJson() {
+    final payload = {
+      'exportedAt': DateTime.now().toIso8601String(),
+      'components': components.map((c) => c.toJson()).toList(),
+    };
+    final pretty = const JsonEncoder.withIndent('  ').convert(payload);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Exportar JSON (copiar)'),
+        content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: SelectableText(pretty))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar'))],
+      ),
+    );
+  }
+
+  Future<void> _importJson() async {
+    final ctrl = TextEditingController();
+    await showDialog(context: context, builder: (_) {
+      return AlertDialog(
+        title: const Text('Importar JSON (cole aqui)'),
+        content: SingleChildScrollView(child: TextField(controller: ctrl, maxLines: 12, decoration: const InputDecoration(hintText: 'Cole o JSON exportado...'))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(onPressed: () {
+            final raw = ctrl.text.trim();
+            if (raw.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('JSON vazio')));
+              return;
+            }
+            try {
+              final parsed = json.decode(raw) as Map<String, dynamic>;
+              final comps = (parsed['components'] as List).map((e) => Component.fromJson(Map<String, dynamic>.from(e))).toList();
+              // simple check for duplicate names among imported
+              final names = comps.map((c) => c.name).toSet();
+              if (names.length != comps.length) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Import contém nomes duplicados')));
+                return;
+              }
+              setState(() => components.addAll(comps));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Importação concluída')));
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao importar: $e')));
+            }
+          }, child: const Text('Importar'))
+        ],
+      );
+    });
+  }
+
+  // ---------- CSV generation ----------
+  void _generateCsv() {
+    final rows = <List<String>>[]; // Corrected: Initialized rows as an empty list.
+    rows.add(['ID', 'Nome', 'Categoria', 'Tipo', 'Prioridade', 'Status', 'Criado', 'Atualizado']);
+    void addRows(Component c) {
+      rows.add([c.id, c.name, c.category, c.type, c.priority, c.status, c.createdAt.toIso8601String(), c.updatedAt.toIso8601String()]);
+      for (var ch in c.children) addRows(ch);
+    }
+
+    for (var c in components) addRows(c);
+    final csv = rows.map((r) => r.map((v) => '"${v.replaceAll('"', '""')}"').join(',')).join('\n');
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('CSV Gerado (copiar)'),
+        content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: SelectableText(csv))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar'))],
+      ),
+    );
+  }
+
+  // ---------- Details screen ----------
+  void _openDetails(Component c, {Component? parent}) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) {
+      return Scaffold(
+        appBar: AppBar(title: Text(c.name)),
+        body: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (c.tags.isNotEmpty) Wrap(spacing: 8, children: c.tags.map((t) => Chip(label: Text(t))).toList()),
+              const SizedBox(height: 8),
+              Text('Categoria: ${c.category}'),
+              Text('Tipo: ${c.type}'),
+              Text('Prioridade: ${c.priority}'),
+              Text('Status: ${c.status}'),
+              Text('Responsável: ${c.responsible}'),
+              Text('Criado: ${c.createdAt.toLocal()}'),
+              Text('Atualizado: ${c.updatedAt.toLocal()}'),
+              if (c.dueDate != null) Text('Data alvo: ${c.dueDate!.toLocal().toIso8601String().split("T").first}'),
+              const SizedBox(height: 12),
+              const Text('Descrição:'),
+              Text(c.description.isEmpty ? '- vazio -' : c.description),
+              const SizedBox(height: 12),
+              const Text('Anexos:'),
+              if (c.attachments.isEmpty) const Text('- nenhum -'),
+              ...c.attachments.map((a) => ListTile(title: Text(a), trailing: IconButton(icon: const Icon(Icons.open_in_new), onPressed: () {
+                showDialog(context: context, builder: (_) => AlertDialog(title: Text(a), content: SelectableText('Conteúdo simulado de "$a"'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar'))]));
+              }))),
+              const SizedBox(height: 12),
+              const Text('Subcomponentes:'),
+              if (c.children.isEmpty) const Text('- nenhum -'),
+              ...c.children.map((ch) => ListTile(title: Text(ch.name), subtitle: Text(ch.type), trailing: IconButton(icon: const Icon(Icons.arrow_forward), onPressed: () => _openDetails(ch, parent: c)))),
+              const SizedBox(height: 12),
+              const Text('Histórico:'),
+              ...c.history.reversed.map((h) => Text('- $h')).toList(),
+            ]),
+          ),
+        ),
+        floatingActionButton: Column(mainAxisSize: MainAxisSize.min, children: [
+          FloatingActionButton.extended(label: const Text('Editar'), icon: const Icon(Icons.edit), onPressed: () { Navigator.pop(context); _openEdit(c); }),
+          const SizedBox(height: 8),
+          FloatingActionButton.extended(label: const Text('Criar filho'), icon: const Icon(Icons.subdirectory_arrow_right), onPressed: () { Navigator.pop(context); _openCreate(parent: c); }),
+        ]),
+      );
+    }));
+  }
+
+  // ---------- UI Helpers ----------
+  void _showSnack(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  // ---------- Clear all (local) ----------
+  void _clearAll() {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Limpar tudo'),
+      content: const Text('Remover todos os componentes em memória (irreversível durante esta sessão). Deseja continuar?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        ElevatedButton(onPressed: () {
+          setState(() => components.clear());
+          Navigator.pop(context);
+          _showSnack('Dados apagados (memória).');
+        }, child: const Text('Sim')),
+      ],
+    ));
+  }
+
+  // ---------- Build ----------
+  @override
+  Widget build(BuildContext context) {
+    final view = _viewList;
+    final isMobile = MediaQuery.of(context).size.width < 800;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('MASD — Completo (DartPad Friendly)'),
+        actions: [
+          IconButton(icon: const Icon(Icons.upload_file), tooltip: 'Exportar JSON', onPressed: _exportJson),
+          IconButton(icon: const Icon(Icons.download), tooltip: 'Importar JSON', onPressed: _importJson),
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              switch (v) {
+                case 'csv':
+                  _generateCsv();
+                  break;
+                case 'clear':
+                  _clearAll();
+                  break;
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'csv', child: Text('Gerar CSV')),
+              PopupMenuItem(value: 'clear', child: Text('Limpar (memória)')),
+            ],
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        icon: const Icon(Icons.add),
+        label: const Text('Novo'),
+        onPressed: () => _openCreate(),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: isMobile ? Column(children: [_buildFilterRow(), const SizedBox(height: 8), Expanded(child: _buildList(view))]) : Row(children: [Expanded(flex: 3, child: Column(children: [_buildFilterRow(), const SizedBox(height: 8), Expanded(child: _buildList(view))])), const SizedBox(width: 12), Expanded(flex: 2, child: _buildSidePanel())]),
+      ),
+    );
+  }
+
+  Widget _buildFilterRow() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Wrap(spacing: 8, runSpacing: 8, children: [
+          SizedBox(width: 300, child: TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Pesquisar por nome/descritivo/tag'), onChanged: (v) => setState(() => search = v))),
+          DropdownButton<String>(value: filterCategory, items: ['Todos', ...categories].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => setState(() => filterCategory = v ?? 'Todos')),
+          DropdownButton<String>(value: filterPriority, items: ['Todos', 'Alta', 'Média', 'Baixa'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(), onChanged: (v) => setState(() => filterPriority = v ?? 'Todos')),
+          DropdownButton<String>(value: filterStatus, items: ['Todos', 'Ativo', 'Inativo', 'Em Validação'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() => filterStatus = v ?? 'Todos')),
+          DropdownButton<String>(value: sortBy, items: ['Criado (desc)', 'Criado (asc)', 'Nome (A-Z)', 'Nome (Z-A)'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() => sortBy = v ?? sortBy)),
+          ElevatedButton.icon(icon: const Icon(Icons.filter_alt_off), label: const Text('Limpar'), onPressed: () => setState(() { search = ''; filterCategory = 'Todos'; filterPriority = 'Todos'; filterStatus = 'Todos'; sortBy = 'Criado (desc)'; })),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildList(List<Component> view) {
+    if (view.isEmpty) return const Center(child: Text('Nenhum componente'));
+
+    return ListView.separated(
+      itemCount: view.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) {
+        final c = view[i];
+        return Card(
+          elevation: 2,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                CircleAvatar(child: Text('${i + 1}')),
+                const SizedBox(width: 8),
+                Expanded(child: Text(c.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+                Text(c.priority, style: TextStyle(color: c.priority == 'Alta' ? Colors.red : (c.priority == 'Média' ? Colors.orange : Colors.green))),
+                const SizedBox(width: 12),
+                PopupMenuButton<String>(
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'view':
+                        _openDetails(c);
+                        break;
+                      case 'edit':
+                        _openEdit(c);
+                        break;
+                      case 'delete':
+                        _delete(c);
+                        break;
+                      case 'copy':
+                        _copy(c);
+                        break;
+                      case 'paste':
+                        _paste();
+                        break;
+                      case 'child':
+                        _openCreate(parent: c);
+                        break;
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'view', child: Text('Visualizar')),
+                    PopupMenuItem(value: 'edit', child: Text('Editar')),
+                    PopupMenuItem(value: 'child', child: Text('Criar subcomponente')),
+                    PopupMenuItem(value: 'copy', child: Text('Copiar')),
+                    PopupMenuItem(value: 'paste', child: Text('Colar (top-level)')),
+                    PopupMenuItem(value: 'delete', child: Text('Excluir', style: TextStyle(color: Colors.red))),
+                  ],
+                ),
+              ]),
+              const SizedBox(height: 6),
+              Text('${c.category} • ${c.type} • ${c.status}'),
+              const SizedBox(height: 6),
+              Text(c.description, maxLines: 3, overflow: TextOverflow.ellipsis),
+              if (c.children.isNotEmpty) ...[
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(left: 12.0),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Subcomponentes:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Column(children: c.children.map((ch) {
+                      return ListTile(contentPadding: EdgeInsets.zero, title: Text(ch.name), subtitle: Text(ch.type), trailing: Wrap(spacing: 6, children: [
+                        IconButton(icon: const Icon(Icons.visibility), onPressed: () => _openDetails(ch, parent: c)),
+                        IconButton(icon: const Icon(Icons.edit), onPressed: () => _openEdit(ch)),
+                        IconButton(icon: const Icon(Icons.delete), onPressed: () => _delete(ch, parent: c)),
+                      ]));
+                    }).toList())
+                  ]),
+                ),
+              ],
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSidePanel() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Visão Rápida', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('Total componentes: ${components.length}'),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, children: categories.map((c) => ActionChip(label: Text(c), onPressed: () => setState(() => filterCategory = c))).toList()),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(icon: const Icon(Icons.upload_file), label: const Text('Exportar JSON'), onPressed: _exportJson),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(icon: const Icon(Icons.download), label: const Text('Importar JSON'), onPressed: _importJson),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(icon: const Icon(Icons.file_copy), label: const Text('Gerar CSV'), onPressed: _generateCsv),
+          const SizedBox(height: 12),
+          const Text('Últimos logs:', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          Expanded(child: ListView(children: _collectRecentHistory().map((l) => Text('• $l')).toList())),
+        ]),
+      ),
+    );
+  }
+
+  List<String> _collectRecentHistory({int take = 10}) {
+    final logs = <String>[];
+    for (var c in components) {
+      logs.addAll(c.history.reversed.take(2));
+    }
+    if (logs.isEmpty) logs.add('Nenhuma ação registrada ainda.');
+    return logs;
+  }
+}
